@@ -1,6 +1,9 @@
 # oh-my-claudecode state and session data
 .omc/
 
+# Serena MCP
+.serena/
+
 # Helm chart packages
 *.tgz
 
