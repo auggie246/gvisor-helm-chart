@@ -1,0 +1,38 @@
+# Example overrides: pull gVisor binaries from a private Nexus raw repo with
+# authentication and checksum verification enabled.
+#
+#   kubectl create namespace gvisor-system
+#   kubectl -n gvisor-system create secret generic nexus-creds \
+#     --from-literal=username='svc-gvisor' \
+#     --from-literal=password='REDACTED'
+#   helm install gvisor-deploy ./ -n gvisor-system \
+#     -f ci/private-nexus.values.yaml
+
+binaries:
+  # Point at YOUR Nexus raw repository (no trailing slash).
+  baseUrl: "https://nexus.internal.example.com/repository/gvisor-raw"
+  # Optional release/arch sub-path appended to baseUrl.
+  path: "release/latest/x86_64"
+  runsc:
+    fileName: "runsc"
+    sha512FileName: "runsc.sha512"
+  shim:
+    fileName: "containerd-shim-runsc-v1"
+    sha512FileName: "containerd-shim-runsc-v1.sha512"
+  verifyChecksum: true
+
+# Basic-auth credentials for the Nexus repo, sourced from an existing secret.
+downloadSecret:
+  enabled: true
+  name: "nexus-creds"
+  usernameKey: "username"
+  passwordKey: "password"
+
+containerd:
+  configPath: "/etc/containerd/config.toml"
+  restartContainerd: true
+  runtimeName: "runsc"
+
+runtimeClass:
+  create: true
+  name: "gvisor"

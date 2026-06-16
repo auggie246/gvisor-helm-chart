@@ -1,0 +1,21 @@
+# oh-my-claudecode state and session data
+.omc/
+
+# Helm chart packages
+*.tgz
+
+# Helm dependency directory
+/charts/
+
+# JetBrains IDEs
+.idea/
+
+# VS Code
+.vscode/
+
+# Vim swap files
+*.swp
+*.swo
+
+# macOS metadata
+.DS_Store

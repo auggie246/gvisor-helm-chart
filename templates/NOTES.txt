@@ -1,0 +1,29 @@
+gvisor-deploy has been installed successfully.
+
+The node installer DaemonSet is rolling out across your selected nodes. Each node will:
+  1. Download the gVisor binaries (runsc + containerd-shim-runsc-v1) from your configured repository.
+  2. Install them into {{ .Values.install.binDir }} on the host.
+  3. Register the "{{ .Values.containerd.runtimeName }}" runtime in {{ .Values.containerd.configPath }}.
+  4. Restart containerd (if enabled).
+
+To verify the DaemonSet is running and ready:
+
+  kubectl -n {{ include "gvisor-deploy.namespace" . }} get daemonset {{ include "gvisor-deploy.fullname" . }}
+  kubectl -n {{ include "gvisor-deploy.namespace" . }} get pods -l {{ include "gvisor-deploy.selectorLabels" . | replace ": " "=" | replace "\n" "," }}
+
+{{- if .Values.runtimeClass.create }}
+
+The RuntimeClass "{{ .Values.runtimeClass.name }}" has been created. To run a pod using gVisor, add
+`spec.runtimeClassName` to your Pod or Deployment manifest:
+
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: gvisor-test
+  spec:
+    runtimeClassName: {{ .Values.runtimeClass.name }}
+    containers:
+      - name: test
+        image: busybox
+        command: ["sh", "-c", "uname -r && sleep 3600"]
+{{- end }}

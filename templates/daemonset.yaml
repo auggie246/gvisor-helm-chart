@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "gvisor-deploy.fullname" . }}
+  namespace: {{ include "gvisor-deploy.namespace" . }}
+  labels:
+    {{- include "gvisor-deploy.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "gvisor-deploy.selectorLabels" . | nindent 6 }}
+  {{- with .Values.updateStrategy }}
+  updateStrategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "gvisor-deploy.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "gvisor-deploy.serviceAccountName" . }}
+      hostPID: true
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: installer
+          image: {{ include "gvisor-deploy.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/sh", "/scripts/install.sh"]
+          securityContext:
+            privileged: true
+          env:
+            - name: BASE_URL
+              value: {{ .Values.binaries.baseUrl | quote }}
+            - name: BIN_PATH
+              value: {{ .Values.binaries.path | quote }}
+            - name: RUNSC_FILE
+              value: {{ .Values.binaries.runsc.fileName | quote }}
+            - name: RUNSC_SHA
+              value: {{ .Values.binaries.runsc.sha512FileName | quote }}
+            - name: SHIM_FILE
+              value: {{ .Values.binaries.shim.fileName | quote }}
+            - name: SHIM_SHA
+              value: {{ .Values.binaries.shim.sha512FileName | quote }}
+            - name: VERIFY_CHECKSUM
+              value: {{ .Values.binaries.verifyChecksum | quote }}
+            - name: BIN_DIR
+              value: {{ .Values.install.binDir | quote }}
+            - name: CONFIG_PATH
+              value: {{ .Values.containerd.configPath | quote }}
+            - name: BACKUP_SUFFIX
+              value: {{ .Values.containerd.backupSuffix | quote }}
+            - name: RESTART_CONTAINERD
+              value: {{ .Values.containerd.restartContainerd | quote }}
+            - name: RUNTIME_NAME
+              value: {{ .Values.containerd.runtimeName | quote }}
+            {{- if .Values.downloadSecret.enabled }}
+            - name: NEXUS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.downloadSecret.name | quote }}
+                  key: {{ .Values.downloadSecret.usernameKey | quote }}
+            - name: NEXUS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.downloadSecret.name | quote }}
+                  key: {{ .Values.downloadSecret.passwordKey | quote }}
+            {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: host-root
+              mountPath: /host
+            - name: install-scripts
+              mountPath: /scripts
+      volumes:
+        - name: host-root
+          hostPath:
+            path: /
+        - name: install-scripts
+          configMap:
+            name: {{ include "gvisor-deploy.fullname" . }}-install

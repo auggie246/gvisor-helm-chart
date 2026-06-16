@@ -1,0 +1,31 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "gvisor-deploy.fullname" . }}
+  labels:
+    {{- include "gvisor-deploy.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["node.k8s.io"]
+    resources: ["runtimeclasses"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "gvisor-deploy.fullname" . }}
+  labels:
+    {{- include "gvisor-deploy.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "gvisor-deploy.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "gvisor-deploy.serviceAccountName" . }}
+    namespace: {{ include "gvisor-deploy.namespace" . }}

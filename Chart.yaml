@@ -1,0 +1,19 @@
+apiVersion: v2
+name: gvisor-deploy
+description: A Helm chart that installs gVisor (runsc + containerd-shim-runsc-v1) onto Kubernetes nodes and configures containerd to use the runsc runtime.
+type: application
+version: 0.1.0
+# appVersion tracks the gVisor release this chart targets by default.
+appVersion: "latest"
+keywords:
+  - gvisor
+  - runsc
+  - sandbox
+  - container-runtime
+  - security
+home: https://gvisor.dev
+sources:
+  - https://github.com/google/gvisor
+  - https://gvisor.dev/docs/user_guide/containerd/quick_start/
+maintainers:
+  - name: Augustine

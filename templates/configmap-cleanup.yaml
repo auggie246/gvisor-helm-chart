@@ -1,0 +1,47 @@
+{{- if .Values.cleanup.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gvisor-deploy.fullname" . }}-cleanup
+  namespace: {{ include "gvisor-deploy.namespace" . }}
+  labels:
+    {{- include "gvisor-deploy.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+data:
+  cleanup.sh: |
+    #!/bin/sh
+    set -eu
+
+    # Restore the most recent backup of the containerd config (if any exists).
+    BACKUP=$(ls -1t "/host${CONFIG_PATH}${BACKUP_SUFFIX}".* 2>/dev/null | head -n1 || true)
+    if [ -n "$BACKUP" ]; then
+      echo "Restoring containerd config from backup: ${BACKUP}"
+      cp "$BACKUP" "/host${CONFIG_PATH}"
+    else
+      echo "No backup found; skipping containerd config restore."
+    fi
+
+    # Remove gVisor binaries from the host.
+    RUNSC_PATH="/host${BIN_DIR}/${RUNSC_FILENAME}"
+    SHIM_PATH="/host${BIN_DIR}/${SHIM_FILENAME}"
+
+    if [ -f "$RUNSC_PATH" ]; then
+      echo "Removing ${RUNSC_PATH}"
+      rm -f "$RUNSC_PATH"
+    fi
+
+    if [ -f "$SHIM_PATH" ]; then
+      echo "Removing ${SHIM_PATH}"
+      rm -f "$SHIM_PATH"
+    fi
+
+    # Restart containerd via nsenter (best-effort; failures are tolerated).
+    echo "Restarting containerd via nsenter..."
+    nsenter --target 1 --mount --uts --ipc --net --pid -- systemctl restart containerd || \
+      chroot /host systemctl restart containerd || \
+      echo "WARNING: could not restart containerd; manual restart may be required."
+
+    echo "Cleanup complete."
+{{- end }}

@@ -1,0 +1,70 @@
+{{- if .Values.cleanup.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "gvisor-deploy.fullname" . }}-cleanup
+  namespace: {{ include "gvisor-deploy.namespace" . }}
+  labels:
+    {{- include "gvisor-deploy.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  template:
+    metadata:
+      labels:
+        {{- include "gvisor-deploy.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ include "gvisor-deploy.serviceAccountName" . }}
+      hostPID: true
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: cleanup
+          image: {{ include "gvisor-deploy.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/sh", "/scripts/cleanup.sh"]
+          securityContext:
+            privileged: true
+          env:
+            - name: BIN_DIR
+              value: {{ .Values.install.binDir | quote }}
+            - name: CONFIG_PATH
+              value: {{ .Values.containerd.configPath | quote }}
+            - name: BACKUP_SUFFIX
+              value: {{ .Values.containerd.backupSuffix | quote }}
+            - name: RUNTIME_NAME
+              value: {{ .Values.containerd.runtimeName | quote }}
+            - name: RUNSC_FILENAME
+              value: {{ .Values.binaries.runsc.fileName | quote }}
+            - name: SHIM_FILENAME
+              value: {{ .Values.binaries.shim.fileName | quote }}
+          volumeMounts:
+            - name: host-root
+              mountPath: /host
+            - name: cleanup-scripts
+              mountPath: /scripts
+      volumes:
+        - name: host-root
+          hostPath:
+            path: /
+        - name: cleanup-scripts
+          configMap:
+            name: {{ include "gvisor-deploy.fullname" . }}-cleanup
+            defaultMode: 0755
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

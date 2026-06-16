@@ -1,0 +1,93 @@
+# Default values for gvisor-deploy.
+# This chart runs a privileged DaemonSet that, on every selected node:
+#   1. Downloads `runsc` and `containerd-shim-runsc-v1` from a (private) repo.
+#   2. Installs them into the host bin directory (default /usr/local/bin).
+#   3. Backs up and edits /etc/containerd/config.toml to register the runsc runtime.
+#   4. Restarts containerd.
+# A RuntimeClass (default name "gvisor") is created so workloads can opt in via
+# `spec.runtimeClassName: gvisor`.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Namespace override for namespaced resources. Defaults to the release namespace.
+namespaceOverride: ""
+
+# Image used by the node installer DaemonSet.
+# Requirements: POSIX shell + (curl OR wget) + coreutils (sha512sum, install, cp, sed).
+image:
+  repository: debian
+  tag: "stable-slim"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# ---------------------------------------------------------------------------
+# Source for the gVisor binaries.
+# These are pulled from YOUR private Nexus repository. Everything here is
+# configurable so the chart never reaches out to the public gVisor storage
+# unless you point it there.
+# Final download URL = <baseUrl>[/<path>]/<fileName>
+# ---------------------------------------------------------------------------
+binaries:
+  # Base URL of the private Nexus (raw) repository. No trailing slash. REQUIRED.
+  baseUrl: "https://nexus.example.com/repository/gvisor-raw"
+  # Optional sub-path appended to baseUrl, e.g. "release/latest/x86_64".
+  path: ""
+  runsc:
+    fileName: "runsc"
+    # Optional checksum file served next to the binary. Empty => skip verification.
+    sha512FileName: ""
+  shim:
+    fileName: "containerd-shim-runsc-v1"
+    sha512FileName: ""
+  # Verify each binary against its .sha512 file (requires *.sha512FileName set).
+  verifyChecksum: false
+  # Extra raw args appended to the download tool invocation (curl/wget),
+  # e.g. ["--insecure"] or a custom header. Credentials should use downloadSecret.
+  extraDownloadArgs: []
+
+# Optional secret supplying basic-auth credentials for the private Nexus repo.
+# When enabled, NEXUS_USERNAME / NEXUS_PASSWORD are injected into the installer
+# from this secret and used for authenticated downloads.
+downloadSecret:
+  enabled: false
+  name: ""
+  usernameKey: "username"
+  passwordKey: "password"
+
+# Host install location for the binaries (gVisor docs default: /usr/local/bin).
+install:
+  binDir: "/usr/local/bin"
+
+# Containerd configuration handling.
+containerd:
+  # Path to the containerd config file on the host.
+  configPath: "/etc/containerd/config.toml"
+  # Suffix for the timestamped backup taken before any edit.
+  backupSuffix: ".gvisor.bak"
+  # Restart containerd (systemctl restart containerd) after editing the config.
+  restartContainerd: true
+  # Runtime name registered in containerd config AND used as the RuntimeClass handler.
+  runtimeName: "runsc"
+
+# RuntimeClass that workloads reference via spec.runtimeClassName.
+runtimeClass:
+  create: true
+  name: "gvisor"
+
+# ---------------------------------------------------------------------------
+# DaemonSet scheduling / pod settings.
+# ---------------------------------------------------------------------------
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+resources: {}
+updateStrategy:
+  type: RollingUpdate
+
+# On `helm uninstall`, run a cleanup hook that restores the containerd config
+# backup and removes the installed binaries from the host.
+cleanup:
+  enabled: true

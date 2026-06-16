@@ -1,0 +1,157 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gvisor-deploy.fullname" . }}-install
+  namespace: {{ include "gvisor-deploy.namespace" . }}
+  labels:
+    {{- include "gvisor-deploy.labels" . | nindent 4 }}
+data:
+  install.sh: |
+    #!/bin/sh
+    set -eu
+
+    echo "[gvisor-install] starting installer"
+
+    # ---------------------------------------------------------------------------
+    # Detect download tool and build DL() helper with optional basic auth.
+    # ---------------------------------------------------------------------------
+    if command -v curl >/dev/null 2>&1; then
+      DL() {
+        _url="$1"; _out="$2"
+        if [ -n "${NEXUS_USERNAME:-}" ] && [ -n "${NEXUS_PASSWORD:-}" ]; then
+          curl -fsSL -u "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
+            {{- range .Values.binaries.extraDownloadArgs }}
+            {{ . | quote }} \
+            {{- end }}
+            -o "$_out" "$_url"
+        else
+          curl -fsSL \
+            {{- range .Values.binaries.extraDownloadArgs }}
+            {{ . | quote }} \
+            {{- end }}
+            -o "$_out" "$_url"
+        fi
+      }
+      echo "[gvisor-install] using curl"
+    elif command -v wget >/dev/null 2>&1; then
+      DL() {
+        _url="$1"; _out="$2"
+        if [ -n "${NEXUS_USERNAME:-}" ] && [ -n "${NEXUS_PASSWORD:-}" ]; then
+          wget -q --user="${NEXUS_USERNAME}" --password="${NEXUS_PASSWORD}" \
+            {{- range .Values.binaries.extraDownloadArgs }}
+            {{ . | quote }} \
+            {{- end }}
+            -O "$_out" "$_url"
+        else
+          wget -q \
+            {{- range .Values.binaries.extraDownloadArgs }}
+            {{ . | quote }} \
+            {{- end }}
+            -O "$_out" "$_url"
+        fi
+      }
+      echo "[gvisor-install] using wget"
+    else
+      echo "[gvisor-install] ERROR: neither curl nor wget found" >&2
+      exit 1
+    fi
+
+    # ---------------------------------------------------------------------------
+    # Build base URL (append BIN_PATH if set).
+    # ---------------------------------------------------------------------------
+    if [ -n "${BIN_PATH:-}" ]; then
+      REPO_URL="${BASE_URL}/${BIN_PATH}"
+    else
+      REPO_URL="${BASE_URL}"
+    fi
+
+    # ---------------------------------------------------------------------------
+    # Download binaries to a temp directory.
+    # ---------------------------------------------------------------------------
+    TMPDIR="$(mktemp -d)"
+    trap 'rm -rf "$TMPDIR"' EXIT
+
+    echo "[gvisor-install] downloading ${RUNSC_FILE} from ${REPO_URL}"
+    DL "${REPO_URL}/${RUNSC_FILE}" "${TMPDIR}/${RUNSC_FILE}"
+
+    echo "[gvisor-install] downloading ${SHIM_FILE} from ${REPO_URL}"
+    DL "${REPO_URL}/${SHIM_FILE}" "${TMPDIR}/${SHIM_FILE}"
+
+    # ---------------------------------------------------------------------------
+    # Verify checksums if requested.
+    # ---------------------------------------------------------------------------
+    if [ "${VERIFY_CHECKSUM:-false}" = "true" ]; then
+      if [ -n "${RUNSC_SHA:-}" ]; then
+        echo "[gvisor-install] verifying checksum for ${RUNSC_FILE}"
+        DL "${REPO_URL}/${RUNSC_SHA}" "${TMPDIR}/${RUNSC_SHA}"
+        ( cd "$TMPDIR" && sha512sum -c "${RUNSC_SHA}" )
+      fi
+      if [ -n "${SHIM_SHA:-}" ]; then
+        echo "[gvisor-install] verifying checksum for ${SHIM_FILE}"
+        DL "${REPO_URL}/${SHIM_SHA}" "${TMPDIR}/${SHIM_SHA}"
+        ( cd "$TMPDIR" && sha512sum -c "${SHIM_SHA}" )
+      fi
+    fi
+
+    # ---------------------------------------------------------------------------
+    # Install binaries into /host<BIN_DIR>.
+    # ---------------------------------------------------------------------------
+    DEST="/host${BIN_DIR}"
+    echo "[gvisor-install] installing binaries to ${DEST}"
+    install -m 755 "${TMPDIR}/${RUNSC_FILE}" "${DEST}/${RUNSC_FILE}"
+    install -m 755 "${TMPDIR}/${SHIM_FILE}" "${DEST}/${SHIM_FILE}"
+    echo "[gvisor-install] binaries installed"
+
+    # ---------------------------------------------------------------------------
+    # Backup containerd config (once per run, only if it exists).
+    # ---------------------------------------------------------------------------
+    HOST_CONFIG="/host${CONFIG_PATH}"
+    if [ -f "${HOST_CONFIG}" ]; then
+      BACKUP="${HOST_CONFIG}${BACKUP_SUFFIX}.$(date +%s)"
+      echo "[gvisor-install] backing up ${HOST_CONFIG} to ${BACKUP}"
+      cp "${HOST_CONFIG}" "${BACKUP}"
+    else
+      echo "[gvisor-install] ${HOST_CONFIG} not found; skipping backup"
+    fi
+
+    # ---------------------------------------------------------------------------
+    # Idempotently add the runsc runtime block to containerd config.
+    # ---------------------------------------------------------------------------
+    if [ -f "${HOST_CONFIG}" ]; then
+      RUNTIME_KEY="runtimes.${RUNTIME_NAME}]"
+      if grep -qF "${RUNTIME_KEY}" "${HOST_CONFIG}"; then
+        echo "[gvisor-install] runtime '${RUNTIME_NAME}' already registered in ${HOST_CONFIG}; skipping edit"
+      else
+        echo "[gvisor-install] adding runtime '${RUNTIME_NAME}' to ${HOST_CONFIG}"
+        {
+          printf '\n'
+          printf '[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.%s]\n' "${RUNTIME_NAME}"
+          printf '  runtime_type = "io.containerd.runsc.v1"\n'
+        } >> "${HOST_CONFIG}"
+        echo "[gvisor-install] containerd config updated"
+      fi
+    else
+      echo "[gvisor-install] ${HOST_CONFIG} does not exist; skipping containerd config edit"
+    fi
+
+    # ---------------------------------------------------------------------------
+    # Restart containerd if requested.
+    # ---------------------------------------------------------------------------
+    if [ "${RESTART_CONTAINERD:-false}" = "true" ]; then
+      echo "[gvisor-install] restarting containerd via nsenter"
+      if nsenter --target 1 --mount --uts --ipc --net --pid -- systemctl restart containerd; then
+        echo "[gvisor-install] containerd restarted successfully"
+      else
+        echo "[gvisor-install] nsenter restart failed; trying chroot fallback"
+        if chroot /host systemctl restart containerd; then
+          echo "[gvisor-install] containerd restarted via chroot"
+        else
+          echo "[gvisor-install] WARNING: containerd restart failed; you may need to restart it manually"
+        fi
+      fi
+    fi
+
+    echo "[gvisor-install] done"
+
+    # Keep the pod alive and ready; re-run is idempotent on restart.
+    exec sleep infinity
