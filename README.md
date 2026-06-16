@@ -41,9 +41,28 @@ References: [gVisor install guide](https://gvisor.dev/docs/user_guide/install/) 
 
 ## Install
 
+### Install from the Helm repository
+
+The packaged chart is published to GitHub Pages via the chart-releaser workflow.
+Add the repo once, then install:
+
+```sh
+helm repo add gvisor-deploy https://auggie246.github.io/gvisor-helm-chart
+helm repo update
+helm install gvisor-deploy gvisor-deploy/gvisor-deploy \
+  -n gvisor-system --create-namespace \
+  --set binaries.baseUrl=https://nexus.internal.example.com/repository/gvisor-raw
+```
+
+> **Note:** GitHub Pages must be enabled once (repo Settings → Pages → branch: `gh-pages`)
+> for the repository URL to serve. The release workflow creates the `gh-pages` branch on
+> its first run.
+
+### Install from local source / cloned repo
+
 ```sh
 # Point the chart at your private Nexus repo and install.
-helm install gvisor-deploy ./ \
+helm install gvisor-deploy ./charts/gvisor-deploy \
   -n gvisor-system --create-namespace \
   --set binaries.baseUrl=https://nexus.internal.example.com/repository/gvisor-raw
 ```
@@ -56,8 +75,8 @@ kubectl -n gvisor-system create secret generic nexus-creds \
   --from-literal=username='svc-gvisor' \
   --from-literal=password='REDACTED'
 
-helm install gvisor-deploy ./ -n gvisor-system \
-  -f ci/private-nexus.values.yaml
+helm install gvisor-deploy ./charts/gvisor-deploy -n gvisor-system \
+  -f charts/gvisor-deploy/ci/private-nexus.values.yaml
 ```
 
 Verify rollout:

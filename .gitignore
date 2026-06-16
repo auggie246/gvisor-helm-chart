@@ -7,8 +7,8 @@
 # Helm chart packages
 *.tgz
 
-# Helm dependency directory
-/charts/
+# Helm dependency directory (vendored subcharts under a chart, not the charts/ repo dir)
+charts/*/charts/
 
 # JetBrains IDEs
 .idea/

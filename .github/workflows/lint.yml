@@ -1,0 +1,25 @@
+name: Lint and Test Charts
+
+on:
+  pull_request:
+    paths:
+      - 'charts/**'
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Set up chart-testing
+        uses: helm/chart-testing-action@v2
+
+      - name: Run chart-testing (lint)
+        run: ct lint --target-branch main --config .github/configs/ct.yaml
