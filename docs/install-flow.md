@@ -57,10 +57,15 @@ this page is the zoom-in on step 2, "installs gVisor on every node."
 
 ```mermaid
 flowchart TD
-    Start(["installer container starts<br/>/bin/sh /scripts/install.sh"]) --> DLTool{"curl available?"}
-    DLTool -->|yes| DLCurl["DL() = curl -fsSL<br/>+ extraDownloadArgs"]
+    Start(["installer container starts<br/>/bin/sh /scripts/install.sh"]) --> CACheck{"CA_CERT_FILE set?"}
+    CACheck -->|yes| CARead{"CA file readable?"}
+    CARead -->|no| CAFail["ERROR: CA_CERT_FILE not readable<br/>exit 1"]
+    CARead -->|yes| CAOpt["CURL_CA_OPT=--cacert FILE<br/>WGET_CA_OPT=--ca-certificate=FILE"]
+    CACheck -->|no| DLTool
+    CAOpt --> DLTool{"curl available?"}
+    DLTool -->|yes| DLCurl["DL() = curl -fsSL ${CURL_CA_OPT}<br/>+ extraDownloadArgs"]
     DLTool -->|no| WgetCheck{"wget available?"}
-    WgetCheck -->|yes| DLWget["DL() = wget -q<br/>+ extraDownloadArgs"]
+    WgetCheck -->|yes| DLWget["DL() = wget -q ${WGET_CA_OPT}<br/>+ extraDownloadArgs"]
     WgetCheck -->|no| Fail["ERROR: neither curl nor wget<br/>exit 1"]
 
     DLCurl --> Auth{"NEXUS_USERNAME &&<br/>NEXUS_PASSWORD set?"}
@@ -123,10 +128,16 @@ The DaemonSet container (`templates/daemonset.yaml`) injects these into
 | `RUNTIME_NAME` | `containerd.runtimeName` | `runsc` | Runtime key registered in containerd config |
 | `NEXUS_USERNAME` | `downloadSecret.{name,usernameKey}` (Secret) | unset | Basic-auth username, only if `downloadSecret.enabled` |
 | `NEXUS_PASSWORD` | `downloadSecret.{name,passwordKey}` (Secret) | unset | Basic-auth password, only if `downloadSecret.enabled` |
+| `CA_CERT_FILE` | `caBundle.{mountPath,key}` (Secret mount) | unset | Path to mounted CA cert; passed as `--cacert` / `--ca-certificate`, only if `caBundle.enabled` |
 
 `binaries.extraDownloadArgs` isn't an env var — it's rendered directly into
 the `curl`/`wget` invocation inside the ConfigMap template as extra raw CLI
 args (e.g. `["--insecure"]`).
+
+When `caBundle.enabled`, the CA secret is mounted read-only at `caBundle.mountPath`
+and `CA_CERT_FILE` points at the cert. The installer passes it to curl/wget so TLS
+verifies against a private CA — preferred over `--insecure`. The script exits 1 if
+`CA_CERT_FILE` is set but the file is missing/unreadable.
 
 ## The containerd TOML block
 

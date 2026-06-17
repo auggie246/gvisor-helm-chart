@@ -71,6 +71,10 @@ spec:
               value: {{ .Values.containerd.restartContainerd | quote }}
             - name: RUNTIME_NAME
               value: {{ .Values.containerd.runtimeName | quote }}
+            {{- if .Values.caBundle.enabled }}
+            - name: CA_CERT_FILE
+              value: {{ printf "%s/%s" (trimSuffix "/" .Values.caBundle.mountPath) .Values.caBundle.key | quote }}
+            {{- end }}
             {{- if .Values.downloadSecret.enabled }}
             - name: NEXUS_USERNAME
               valueFrom:
@@ -92,6 +96,11 @@ spec:
               mountPath: /host
             - name: install-scripts
               mountPath: /scripts
+            {{- if .Values.caBundle.enabled }}
+            - name: ca-bundle
+              mountPath: {{ .Values.caBundle.mountPath | quote }}
+              readOnly: true
+            {{- end }}
       volumes:
         - name: host-root
           hostPath:
@@ -99,3 +108,11 @@ spec:
         - name: install-scripts
           configMap:
             name: {{ include "gvisor-deploy.fullname" . }}-install
+        {{- if .Values.caBundle.enabled }}
+        - name: ca-bundle
+          secret:
+            secretName: {{ .Values.caBundle.name | quote }}
+            items:
+              - key: {{ .Values.caBundle.key | quote }}
+                path: {{ .Values.caBundle.key | quote }}
+        {{- end }}

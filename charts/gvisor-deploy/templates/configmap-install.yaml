@@ -13,19 +13,37 @@ data:
     echo "[gvisor-install] starting installer"
 
     # ---------------------------------------------------------------------------
+    # Optional custom CA bundle for verifying TLS against a private/internal CA.
+    # When CA_CERT_FILE is set (mounted from caBundle secret), pass it to the
+    # download tool so downloads stay secure without "--insecure".
+    # ---------------------------------------------------------------------------
+    CURL_CA_OPT=""
+    WGET_CA_OPT=""
+    if [ -n "${CA_CERT_FILE:-}" ]; then
+      if [ -r "${CA_CERT_FILE}" ]; then
+        echo "[gvisor-install] using custom CA bundle ${CA_CERT_FILE}"
+        CURL_CA_OPT="--cacert ${CA_CERT_FILE}"
+        WGET_CA_OPT="--ca-certificate=${CA_CERT_FILE}"
+      else
+        echo "[gvisor-install] ERROR: CA_CERT_FILE ${CA_CERT_FILE} not readable" >&2
+        exit 1
+      fi
+    fi
+
+    # ---------------------------------------------------------------------------
     # Detect download tool and build DL() helper with optional basic auth.
     # ---------------------------------------------------------------------------
     if command -v curl >/dev/null 2>&1; then
       DL() {
         _url="$1"; _out="$2"
         if [ -n "${NEXUS_USERNAME:-}" ] && [ -n "${NEXUS_PASSWORD:-}" ]; then
-          curl -fsSL -u "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
+          curl -fsSL ${CURL_CA_OPT} -u "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
             {{- range .Values.binaries.extraDownloadArgs }}
             {{ . | quote }} \
             {{- end }}
             -o "$_out" "$_url"
         else
-          curl -fsSL \
+          curl -fsSL ${CURL_CA_OPT} \
             {{- range .Values.binaries.extraDownloadArgs }}
             {{ . | quote }} \
             {{- end }}
@@ -37,13 +55,13 @@ data:
       DL() {
         _url="$1"; _out="$2"
         if [ -n "${NEXUS_USERNAME:-}" ] && [ -n "${NEXUS_PASSWORD:-}" ]; then
-          wget -q --user="${NEXUS_USERNAME}" --password="${NEXUS_PASSWORD}" \
+          wget -q ${WGET_CA_OPT} --user="${NEXUS_USERNAME}" --password="${NEXUS_PASSWORD}" \
             {{- range .Values.binaries.extraDownloadArgs }}
             {{ . | quote }} \
             {{- end }}
             -O "$_out" "$_url"
         else
-          wget -q \
+          wget -q ${WGET_CA_OPT} \
             {{- range .Values.binaries.extraDownloadArgs }}
             {{ . | quote }} \
             {{- end }}
