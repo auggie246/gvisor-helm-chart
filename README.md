@@ -128,6 +128,29 @@ downloadSecret:
 Set `binaries.verifyChecksum: true` together with `binaries.runsc.sha512FileName` /
 `binaries.shim.sha512FileName` to verify downloads.
 
+## Private / internal CA (secure downloads)
+
+If the repo is served behind an organization root CA, you don't need `--insecure`.
+Mount the CA certificate via `caBundle` — the installer passes it to curl (`--cacert`)
+/ wget (`--ca-certificate`) so TLS verifies against your CA:
+
+```yaml
+caBundle:
+  enabled: true
+  name: root-ca         # secret in the RELEASE namespace holding the CA cert
+  key: ca.crt
+binaries:
+  extraDownloadArgs: []  # drop "--insecure"
+```
+
+The secret is mounted read-only. The installer fails fast if the CA file is missing
+or unreadable (no silent fallback to insecure).
+
+> **Namespace note:** Kubernetes secrets are namespaced. A `root-ca` secret in
+> `flux-system` cannot be mounted into a DaemonSet in another namespace. Either
+> install this chart into that namespace, or replicate the secret into the release
+> namespace (Flux/kustomize sync, reflector, kyverno generate, etc.).
+
 ## Uninstall
 
 ```sh
@@ -169,6 +192,15 @@ backup, removes the installed binaries, and restarts containerd.
 | `downloadSecret.name` | `""` | Name of the existing secret. |
 | `downloadSecret.usernameKey` | `username` | Secret key holding the username. |
 | `downloadSecret.passwordKey` | `password` | Secret key holding the password. |
+
+### CA bundle (TLS against private CA)
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `caBundle.enabled` | `false` | Mount a CA cert and pass it to curl/wget for secure downloads. |
+| `caBundle.name` | `""` | Name of the secret (in the release namespace) holding the CA cert. |
+| `caBundle.key` | `ca.crt` | Key within the secret containing the PEM CA certificate. |
+| `caBundle.mountPath` | `/etc/gvisor-deploy/ca` | Directory the CA secret is mounted into (read-only). |
 
 ### Install target & containerd
 

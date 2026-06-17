@@ -56,6 +56,24 @@ downloadSecret:
   usernameKey: "username"
   passwordKey: "password"
 
+# Optional CA certificate bundle for verifying TLS against a private/internal CA
+# (e.g. a Nexus served behind an org root CA). When enabled, the secret is mounted
+# read-only and its CA file is passed to curl (--cacert) / wget (--ca-certificate),
+# letting you drop "--insecure" from extraDownloadArgs and download securely.
+#
+# NOTE: Kubernetes secrets are namespaced. A "root-ca" secret living in
+# "flux-system" CANNOT be mounted here directly -- it must be replicated into this
+# chart's release namespace (e.g. via a Flux SecretController / kustomize sync).
+# Set `name` to the replicated secret in THIS namespace.
+caBundle:
+  enabled: false
+  # Name of the secret (in the release namespace) holding the CA certificate.
+  name: ""
+  # Key within the secret that contains the PEM-encoded CA certificate.
+  key: "ca.crt"
+  # Directory the secret is mounted into inside the installer container.
+  mountPath: "/etc/gvisor-deploy/ca"
+
 # Host install location for the binaries (gVisor docs default: /usr/local/bin).
 install:
   binDir: "/usr/local/bin"
