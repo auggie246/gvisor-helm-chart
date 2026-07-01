@@ -6,7 +6,7 @@ gVisor application kernel sandbox via a `RuntimeClass`.
 
 It is modelled on the `kata-deploy` pattern: a privileged `DaemonSet` does the per-node
 installation, and a `RuntimeClass` exposes the runtime to pods. Binaries are pulled from a
-**configurable** (private Nexus) repository — the chart never reaches out to the public
+**configurable** private repository — the chart never reaches out to the public
 gVisor storage unless you point it there.
 
 ## What it does
@@ -35,7 +35,7 @@ References: [gVisor install guide](https://gvisor.dev/docs/user_guide/install/) 
 ## Prerequisites
 
 - Kubernetes nodes using **containerd** with the CRI plugin (config v2/v3).
-- Nodes able to reach your private Nexus repository.
+- Nodes able to reach your private repository.
 - Permission to run a **privileged**, `hostPID` DaemonSet that mounts the host filesystem.
 - Helm 3+ (developed/tested against Helm v4).
 
@@ -51,7 +51,7 @@ helm repo add gvisor-deploy https://auggie246.github.io/gvisor-helm-chart
 helm repo update
 helm install gvisor-deploy gvisor-deploy/gvisor-deploy \
   -n gvisor-system --create-namespace \
-  --set binaries.baseUrl=https://nexus.internal.example.com/repository/gvisor-raw
+  --set binaries.baseUrl=https://repo.internal.example.com/repository/gvisor-raw
 ```
 
 > **Note:** GitHub Pages must be enabled once (repo Settings → Pages → branch: `gh-pages`)
@@ -61,22 +61,22 @@ helm install gvisor-deploy gvisor-deploy/gvisor-deploy \
 ### Install from local source / cloned repo
 
 ```sh
-# Point the chart at your private Nexus repo and install.
+# Point the chart at your private repo and install.
 helm install gvisor-deploy ./charts/gvisor-deploy \
   -n gvisor-system --create-namespace \
-  --set binaries.baseUrl=https://nexus.internal.example.com/repository/gvisor-raw
+  --set binaries.baseUrl=https://repo.internal.example.com/repository/gvisor-raw
 ```
 
-Or use the provided example overrides (private Nexus + auth + checksum verification):
+Or use the provided example overrides (private repo + auth + checksum verification):
 
 ```sh
 kubectl create namespace gvisor-system
-kubectl -n gvisor-system create secret generic nexus-creds \
+kubectl -n gvisor-system create secret generic repo-creds \
   --from-literal=username='svc-gvisor' \
   --from-literal=password='REDACTED'
 
 helm install gvisor-deploy ./charts/gvisor-deploy -n gvisor-system \
-  -f charts/gvisor-deploy/ci/private-nexus.values.yaml
+  -f charts/gvisor-deploy/ci/private-repo.values.yaml
 ```
 
 Verify rollout:
@@ -106,21 +106,21 @@ spec:
 kubectl exec nginx-gvisor -- dmesg | grep -i gvisor   # should show the gVisor kernel banner
 ```
 
-## Private Nexus / authentication
+## Private repository / authentication
 
 The binaries are downloaded from `binaries.baseUrl` (+ optional `binaries.path`). For
 authenticated repos, create a secret and enable `downloadSecret` — the installer injects
-`NEXUS_USERNAME` / `NEXUS_PASSWORD` and uses HTTP basic auth:
+`REPO_USERNAME` / `REPO_PASSWORD` and uses HTTP basic auth:
 
 ```sh
-kubectl -n gvisor-system create secret generic nexus-creds \
+kubectl -n gvisor-system create secret generic repo-creds \
   --from-literal=username='svc-gvisor' --from-literal=password='REDACTED'
 ```
 
 ```yaml
 downloadSecret:
   enabled: true
-  name: nexus-creds
+  name: repo-creds
   usernameKey: username
   passwordKey: password
 ```
@@ -175,7 +175,7 @@ backup, removes the installed binaries, and restarts containerd.
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `binaries.baseUrl` | `https://nexus.example.com/repository/gvisor-raw` | Base URL of the private repo (no trailing slash). **Set this.** |
+| `binaries.baseUrl` | `https://repo.example.com/repository/gvisor-raw` | Base URL of the private repo (no trailing slash). **Set this.** |
 | `binaries.path` | `""` | Optional sub-path appended to `baseUrl` (e.g. `release/latest/x86_64`). |
 | `binaries.runsc.fileName` | `runsc` | File name of the runsc binary. |
 | `binaries.runsc.sha512FileName` | `""` | Optional runsc checksum file name. |
@@ -241,6 +241,6 @@ filesystem, writes binaries to the host, rewrites `/etc/containerd/config.toml`,
 restarts containerd. Review it before deploying to production:
 
 - Only deploy from a trusted private repository; pin and verify checksums (`verifyChecksum: true`).
-- Keep Nexus credentials in a Secret (`downloadSecret`), not in plain values.
+- Keep repository credentials in a Secret (`downloadSecret`), not in plain values.
 - The containerd restart briefly disrupts the CRI runtime on each node.
 - Backups are timestamped; the cleanup hook restores the newest one on uninstall.

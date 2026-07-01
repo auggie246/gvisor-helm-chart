@@ -36,8 +36,8 @@ data:
     if command -v curl >/dev/null 2>&1; then
       DL() {
         _url="$1"; _out="$2"
-        if [ -n "${NEXUS_USERNAME:-}" ] && [ -n "${NEXUS_PASSWORD:-}" ]; then
-          curl -fsSL ${CURL_CA_OPT} -u "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
+        if [ -n "${REPO_USERNAME:-}" ] && [ -n "${REPO_PASSWORD:-}" ]; then
+          curl -fsSL ${CURL_CA_OPT} -u "${REPO_USERNAME}:${REPO_PASSWORD}" \
             {{- range .Values.binaries.extraDownloadArgs }}
             {{ . | quote }} \
             {{- end }}
@@ -54,8 +54,8 @@ data:
     elif command -v wget >/dev/null 2>&1; then
       DL() {
         _url="$1"; _out="$2"
-        if [ -n "${NEXUS_USERNAME:-}" ] && [ -n "${NEXUS_PASSWORD:-}" ]; then
-          wget -q ${WGET_CA_OPT} --user="${NEXUS_USERNAME}" --password="${NEXUS_PASSWORD}" \
+        if [ -n "${REPO_USERNAME:-}" ] && [ -n "${REPO_PASSWORD:-}" ]; then
+          wget -q ${WGET_CA_OPT} --user="${REPO_USERNAME}" --password="${REPO_PASSWORD}" \
             {{- range .Values.binaries.extraDownloadArgs }}
             {{ . | quote }} \
             {{- end }}

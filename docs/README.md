@@ -9,7 +9,7 @@ The chart installs [gVisor](https://gvisor.dev/) — the `runsc` runtime plus th
 `spec.runtimeClassName: gvisor`. It is modelled on the `kata-deploy` pattern: a
 privileged `DaemonSet` does the per-node install, and a `RuntimeClass` exposes the
 runtime to pods. Binaries are pulled from a **configurable private repository**
-(default a Nexus raw repo) — the chart never reaches the public gVisor storage
+(default a private raw repo) — the chart never reaches the public gVisor storage
 unless you point it there.
 
 ## The 10-second mental model
@@ -17,7 +17,7 @@ unless you point it there.
 ```mermaid
 flowchart LR
     H["helm install"] --> DS["Installer DaemonSet<br/>(privileged, every node)"]
-    DS -->|downloads| NX["Private repo<br/>(Nexus)"]
+   DS -->|downloads| PR["Private repository"]
     DS -->|installs binaries + edits<br/>/etc/containerd/config.toml<br/>+ restarts containerd| HOST["Host node"]
     H --> RC["RuntimeClass<br/>gvisor → runsc"]
     POD["Your Pod<br/>runtimeClassName: gvisor"] --> RC
@@ -69,7 +69,7 @@ helm repo add gvisor-deploy https://auggie246.github.io/gvisor-helm-chart
 helm repo update
 helm install gvisor-deploy gvisor-deploy/gvisor-deploy \
   -n gvisor-system --create-namespace \
-  --set binaries.baseUrl=https://nexus.internal.example.com/repository/gvisor-raw
+   --set binaries.baseUrl=https://repo.internal.example.com/repository/gvisor-raw
 ```
 
 Then run a pod on gVisor:

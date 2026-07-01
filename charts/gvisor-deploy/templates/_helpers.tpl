@@ -161,12 +161,12 @@ with `nindent` to the right depth.
   value: {{ printf "%s/%s" (trimSuffix "/" .Values.caBundle.mountPath) .Values.caBundle.key | quote }}
 {{- end }}
 {{- if .Values.downloadSecret.enabled }}
-- name: NEXUS_USERNAME
+- name: REPO_USERNAME
   valueFrom:
     secretKeyRef:
       name: {{ .Values.downloadSecret.name | quote }}
       key: {{ .Values.downloadSecret.usernameKey | quote }}
-- name: NEXUS_PASSWORD
+- name: REPO_PASSWORD
   valueFrom:
     secretKeyRef:
       name: {{ .Values.downloadSecret.name | quote }}

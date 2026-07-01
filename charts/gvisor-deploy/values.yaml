@@ -104,14 +104,14 @@ imagePullSecrets: []
 
 # ---------------------------------------------------------------------------
 # Source for the gVisor binaries.
-# These are pulled from YOUR private Nexus repository. Everything here is
+# These are pulled from YOUR private repository. Everything here is
 # configurable so the chart never reaches out to the public gVisor storage
 # unless you point it there.
 # Final download URL = <baseUrl>[/<path>]/<fileName>
 # ---------------------------------------------------------------------------
 binaries:
-  # Base URL of the private Nexus (raw) repository. No trailing slash. REQUIRED.
-  baseUrl: "https://nexus.example.com/repository/gvisor-raw"
+  # Base URL of the private raw repository. No trailing slash. REQUIRED.
+  baseUrl: "https://repo.example.com/repository/gvisor-raw"
   # Optional sub-path appended to baseUrl, e.g. "release/latest/x86_64".
   path: ""
   runsc:
@@ -127,8 +127,8 @@ binaries:
   # e.g. ["--insecure"] or a custom header. Credentials should use downloadSecret.
   extraDownloadArgs: []
 
-# Optional secret supplying basic-auth credentials for the private Nexus repo.
-# When enabled, NEXUS_USERNAME / NEXUS_PASSWORD are injected into the installer
+# Optional secret supplying basic-auth credentials for the private repo.
+# When enabled, REPO_USERNAME / REPO_PASSWORD are injected into the installer
 # from this secret and used for authenticated downloads.
 downloadSecret:
   enabled: false
@@ -137,7 +137,7 @@ downloadSecret:
   passwordKey: "password"
 
 # Optional CA certificate bundle for verifying TLS against a private/internal CA
-# (e.g. a Nexus served behind an org root CA). When enabled, the secret is mounted
+# (e.g. a private repo served behind an org root CA). When enabled, the secret is mounted
 # read-only and its CA file is passed to curl (--cacert) / wget (--ca-certificate),
 # letting you drop "--insecure" from extraDownloadArgs and download securely.
 #

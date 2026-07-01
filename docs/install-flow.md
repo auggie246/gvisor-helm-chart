@@ -18,7 +18,7 @@ sequenceDiagram
     participant K as Kubernetes (kubelet)
     participant P as Installer pod<br/>(DaemonSet, privileged)
     participant DL as curl/wget
-    participant NX as Private repo (Nexus)
+    participant PR as Private repository
     participant H as Host filesystem<br/>(via /host bind mount)
     participant NS as nsenter --target 1<br/>(host PID 1 namespaces)
     participant CD as containerd (host)
@@ -27,8 +27,8 @@ sequenceDiagram
     K->>P: schedule installer pod on every matching node
     P->>P: detect curl or wget, build DL() helper
     P->>DL: download RUNSC_FILE, SHIM_FILE (+ .sha512 if VERIFY_CHECKSUM)
-    DL->>NX: GET <BASE_URL>[/BIN_PATH]/<fileName>
-    NX-->>DL: binary (+ checksum file)
+    DL->>PR: GET <BASE_URL>[/BIN_PATH]/<fileName>
+    PR-->>DL: binary (+ checksum file)
     DL-->>P: files in TMPDIR
     P->>P: sha512sum -c (if VERIFY_CHECKSUM=true)
     P->>H: install -m 755 runsc, shim into /host${BIN_DIR}
@@ -68,7 +68,7 @@ flowchart TD
     WgetCheck -->|yes| DLWget["DL() = wget -q ${WGET_CA_OPT}<br/>+ extraDownloadArgs"]
     WgetCheck -->|no| Fail["ERROR: neither curl nor wget<br/>exit 1"]
 
-    DLCurl --> Auth{"NEXUS_USERNAME &&<br/>NEXUS_PASSWORD set?"}
+    DLCurl --> Auth{"REPO_USERNAME &&<br/>REPO_PASSWORD set?"}
     DLWget --> Auth
     Auth -->|yes| AuthDL["curl -u user:pass / wget --user --password"]
     Auth -->|no| PlainDL["unauthenticated request"]
@@ -114,7 +114,7 @@ The DaemonSet container (`templates/daemonset.yaml`) injects these into
 
 | Env var | Source value | Default | Used for |
 |---|---|---|---|
-| `BASE_URL` | `binaries.baseUrl` | `https://nexus.example.com/repository/gvisor-raw` (required override) | Root of the private repo |
+| `BASE_URL` | `binaries.baseUrl` | `https://repo.example.com/repository/gvisor-raw` (required override) | Root of the private repo |
 | `BIN_PATH` | `binaries.path` | `""` | Optional sub-path appended to `BASE_URL` |
 | `RUNSC_FILE` | `binaries.runsc.fileName` | `runsc` | Binary filename to download/install |
 | `RUNSC_SHA` | `binaries.runsc.sha512FileName` | `""` | Checksum filename for `runsc` (empty = no verify) |
@@ -126,8 +126,8 @@ The DaemonSet container (`templates/daemonset.yaml`) injects these into
 | `BACKUP_SUFFIX` | `containerd.backupSuffix` | `.gvisor.bak` | Suffix for the timestamped backup copy |
 | `RESTART_CONTAINERD` | `containerd.restartContainerd` | `true` | Gate for the `nsenter`/`chroot` restart |
 | `RUNTIME_NAME` | `containerd.runtimeName` | `runsc` | Runtime key registered in containerd config |
-| `NEXUS_USERNAME` | `downloadSecret.{name,usernameKey}` (Secret) | unset | Basic-auth username, only if `downloadSecret.enabled` |
-| `NEXUS_PASSWORD` | `downloadSecret.{name,passwordKey}` (Secret) | unset | Basic-auth password, only if `downloadSecret.enabled` |
+| `REPO_USERNAME` | `downloadSecret.{name,usernameKey}` (Secret) | unset | Basic-auth username, only if `downloadSecret.enabled` |
+| `REPO_PASSWORD` | `downloadSecret.{name,passwordKey}` (Secret) | unset | Basic-auth password, only if `downloadSecret.enabled` |
 | `CA_CERT_FILE` | `caBundle.{mountPath,key}` (Secret mount) | unset | Path to mounted CA cert; passed as `--cacert` / `--ca-certificate`, only if `caBundle.enabled` |
 
 `binaries.extraDownloadArgs` isn't an env var — it's rendered directly into
