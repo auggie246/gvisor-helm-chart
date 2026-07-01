@@ -6,9 +6,11 @@ metadata:
   namespace: {{ include "gvisor-deploy.namespace" . }}
   labels:
     {{- include "gvisor-deploy.labels" . | nindent 4 }}
+  {{- if eq (.Values.deploymentMode | default "daemonset") "daemonset" }}
   annotations:
     "helm.sh/hook": pre-delete
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  {{- end }}
 data:
   cleanup.sh: |
     #!/bin/sh

@@ -171,5 +171,12 @@ data:
 
     echo "[gvisor-install] done"
 
-    # Keep the pod alive and ready; re-run is idempotent on restart.
+    # In job mode (EXIT_AFTER_INSTALL=true) the pod exits after install.
+    # In daemonset mode the pod stays alive so it can be re-triggered on restart.
+    if [ "${EXIT_AFTER_INSTALL:-false}" = "true" ]; then
+      echo "[gvisor-install] exiting (job mode)"
+      exit 0
+    fi
+
+    echo "[gvisor-install] keeping pod alive (daemonset mode)"
     exec sleep infinity

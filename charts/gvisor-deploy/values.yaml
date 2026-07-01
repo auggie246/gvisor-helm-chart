@@ -1,11 +1,91 @@
 # Default values for gvisor-deploy.
-# This chart runs a privileged DaemonSet that, on every selected node:
-#   1. Downloads `runsc` and `containerd-shim-runsc-v1` from a (private) repo.
-#   2. Installs them into the host bin directory (default /usr/local/bin).
-#   3. Backs up and edits /etc/containerd/config.toml to register the runsc runtime.
-#   4. Restarts containerd.
-# A RuntimeClass (default name "gvisor") is created so workloads can opt in via
-# `spec.runtimeClassName: gvisor`.
+#
+# Deployment model for installing/cleaning up gVisor on nodes:
+#   daemonset: (default) a long-running privileged DaemonSet installs gVisor on
+#              every matching node. The installer pod stays alive (sleep infinity)
+#              after install so it can be re-triggered on restart.
+#   job:       no always-on component. A tiny dispatcher Job (post-install/upgrade
+#              hook) enumerates target nodes LIVE, creates one node-pinned install
+#              Job per node (paced to job.parallelism), and each per-node Job runs
+#              the install script and EXITS. Uninstall works the same way via a
+#              pre-delete dispatcher that fans out per-node cleanup Jobs.
+#
+# Why a dispatcher instead of rendering per-node Jobs in the chart: Helm stores
+# the whole rendered release in one ~1 MiB Secret, and node membership changes
+# between install and uninstall. The dispatcher keeps the release O(1), resolves
+# nodes at run time, and paces a rollout with built-in Jobs only.
+deploymentMode: daemonset  # daemonset | job
+
+# Node label applied by the install dispatcher to track which nodes have gVisor
+# installed. The cleanup dispatcher defaults to targeting nodes carrying this
+# label, so cleanup only runs where install actually succeeded.
+nodeLabel: "gvisor.dev/installed"
+
+# Settings specific to deploymentMode: job
+job:
+  # Image for the dispatcher (needs kubectl + sh). Used by both the install and
+  # cleanup dispatcher Jobs.
+  kubectlImage:
+    repository: bitnamilegacy/kubectl
+    tag: "1.31"
+    pullPolicy: IfNotPresent
+
+  # Maximum number of nodes processed concurrently. The dispatcher creates at
+  # most this many per-node Jobs per batch, waiting for each batch to finish
+  # before starting the next. Lower it to pace the rollout (e.g. limit how many
+  # CRI runtimes restart at once); raise it to install faster.
+  parallelism: 1
+
+  # How long finished per-node Jobs are retained before automatic garbage
+  # collection (seconds).
+  ttlSecondsAfterFinished: 600
+
+  # Per-node retry budget: retries for a single node's Job before it is marked
+  # failed. One node failing never aborts the others.
+  backoffLimit: 3
+
+  # Timeout (seconds) the dispatcher waits for each per-node Job to complete.
+  jobTimeout: 600
+
+  # How to choose which nodes get a per-node INSTALL Job. Precedence:
+  #   1. job.nodes (explicit list of node names) - if non-empty, used verbatim.
+  #   2. otherwise a label selector built from job.nodeSelector (equality) ANDed
+  #      with job.nodeSelectorExpressions (In/NotIn/Exists/DoesNotExist).
+  #   3. if both are empty, ALL nodes are targeted.
+  #
+  # DEFAULT: target worker (non-control-plane) nodes.
+  #   - Target nodes with a specific label:
+  #       job:
+  #         nodeSelector: { gvisor: "enabled" }
+  #   - Target every node (including control-plane), e.g. single-node clusters:
+  #       job:
+  #         nodeSelectorExpressions: []
+  #   - Pin to explicit nodes:
+  #       job:
+  #         nodes: ["worker-1", "worker-2"]
+  nodes: []
+  # Equality label selector (ANDed with nodeSelectorExpressions). Ignored when
+  # job.nodes is set.
+  nodeSelector: {}
+  # Kubernetes-style label selector requirements. Each entry: { key, operator, values }.
+  # operator is In, NotIn (values required), Exists, or DoesNotExist (values must be empty).
+  # Default selects nodes that are NOT control-plane/master (i.e. worker nodes).
+  nodeSelectorExpressions:
+    - key: node-role.kubernetes.io/control-plane
+      operator: DoesNotExist
+    - key: node-role.kubernetes.io/master
+      operator: DoesNotExist
+
+  # Node selection for the UNINSTALL (pre-delete hook) dispatcher. Same precedence
+  # and semantics as install. The DEFAULT targets nodes carrying the nodeLabel
+  # (i.e. exactly the nodes install actually labeled), resolved LIVE at uninstall
+  # time. Override to clean a different set.
+  cleanup:
+    nodes: []
+    nodeSelector: {}
+    nodeSelectorExpressions:
+      - key: gvisor.dev/installed
+        operator: Exists
 
 nameOverride: ""
 fullnameOverride: ""

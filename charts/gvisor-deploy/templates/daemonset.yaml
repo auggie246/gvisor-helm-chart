@@ -1,3 +1,4 @@
+{{- if eq (.Values.deploymentMode | default "daemonset") "daemonset" }}
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -112,7 +113,8 @@ spec:
         - name: ca-bundle
           secret:
             secretName: {{ .Values.caBundle.name | quote }}
-            items:
-              - key: {{ .Values.caBundle.key | quote }}
-                path: {{ .Values.caBundle.key | quote }}
-        {{- end }}
+             items:
+               - key: {{ .Values.caBundle.key | quote }}
+                 path: {{ .Values.caBundle.key | quote }}
+         {{- end }}
+{{- end }}

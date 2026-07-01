@@ -1,0 +1,109 @@
+{{- /*
+Install dispatcher (deploymentMode: job).
+
+A single, tiny post-install/post-upgrade hook Job that runs the dispatcher
+script. The dispatcher enumerates the selected nodes LIVE, then creates one
+node-pinned install Job per node from the job-templates ConfigMap, paced to
+job.parallelism. Each per-node Job runs install.sh (download, install binaries,
+edit containerd config, restart containerd) and EXITS.
+
+On success the dispatcher labels the node with nodeLabel so the cleanup
+dispatcher can find exactly the nodes that were installed.
+
+Helm waits only on THIS dispatcher Job. before-hook-creation lets `helm upgrade`
+re-run the dispatcher, which re-enumerates nodes (idempotent install stages skip
+already-installed nodes and pick up newly added ones).
+*/ -}}
+{{- if eq (.Values.deploymentMode | default "daemonset") "job" }}
+{{- $root := . }}
+{{- $fullname := include "gvisor-deploy.fullname" . }}
+{{- $namespace := include "gvisor-deploy.namespace" . }}
+{{- $sa := include "gvisor-deploy.dispatcherServiceAccountName" . }}
+{{- $nodes := .Values.job.nodes | default list }}
+{{- $selector := include "gvisor-deploy.nodeLabelSelector" (dict "eq" (.Values.job.nodeSelector | default dict) "exprs" (.Values.job.nodeSelectorExpressions | default list)) }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-install-dispatcher
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "gvisor-deploy.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: {{ $root.Values.job.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "gvisor-deploy.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with $root.Values.imagePullSecrets }}
+      imagePullSecrets:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ $sa }}
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with $root.Values.tolerations }}
+      tolerations:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $root.Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      containers:
+        - name: dispatcher
+          image: {{ include "gvisor-deploy.kubectlImage" $root }}
+          imagePullPolicy: {{ $root.Values.job.kubectlImage.pullPolicy }}
+          securityContext:
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          command: ["/bin/sh", "/scripts/dispatch.sh"]
+          args:
+            - "--job-template=/etc/gvisor-job/install-job.yaml"
+            - "--name-prefix={{ $fullname }}-install"
+            - "--parallelism={{ $root.Values.job.parallelism }}"
+            - "--timeout={{ $root.Values.job.jobTimeout }}"
+            - "--label-key={{ $root.Values.nodeLabel }}"
+            {{- if $nodes }}
+            - "--nodes={{ join "," $nodes }}"
+            {{- else if $selector }}
+            - "--node-selector={{ $selector }}"
+            {{- end }}
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          volumeMounts:
+            - name: dispatcher-scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: job-templates
+              mountPath: /etc/gvisor-job
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: dispatcher-scripts
+          configMap:
+            name: {{ $fullname }}-dispatcher
+            defaultMode: 0755
+        - name: job-templates
+          configMap:
+            name: {{ $fullname }}-job-templates
+        - name: tmp
+          emptyDir: {}
+{{- end }}

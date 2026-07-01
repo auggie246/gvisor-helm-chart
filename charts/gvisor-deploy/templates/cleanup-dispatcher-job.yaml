@@ -1,0 +1,114 @@
+{{- /*
+Cleanup dispatcher (deploymentMode: job, pre-delete hook).
+
+The mirror image of the install dispatcher: a single tiny pre-delete hook Job
+that runs the dispatcher script to fan out one node-pinned cleanup Job per
+selected node, paced to job.parallelism. Each per-node Job runs cleanup.sh
+(restore containerd config backup, remove binaries, restart containerd) and
+EXITS.
+
+Unlike the install dispatcher, node selection here is resolved LIVE when the
+hook runs at `helm uninstall`. The default cleanup selector targets nodes
+carrying the nodeLabel (i.e. exactly the nodes install actually labeled).
+
+This runs while the release's kept ServiceAccount/RBAC, job-templates ConfigMap,
+and cleanup scripts ConfigMap still exist; they are torn down only after
+pre-delete hooks complete.
+*/ -}}
+{{- if eq (.Values.deploymentMode | default "daemonset") "job" }}
+{{- if .Values.cleanup.enabled }}
+{{- $root := . }}
+{{- $fullname := include "gvisor-deploy.fullname" . }}
+{{- $namespace := include "gvisor-deploy.namespace" . }}
+{{- $sa := include "gvisor-deploy.dispatcherServiceAccountName" . }}
+{{- $cleanup := .Values.job.cleanup | default dict }}
+{{- $cNodes := $cleanup.nodes | default list }}
+{{- $cSelector := include "gvisor-deploy.nodeLabelSelector" (dict "eq" ($cleanup.nodeSelector | default dict) "exprs" ($cleanup.nodeSelectorExpressions | default list)) }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-cleanup-dispatcher
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "gvisor-deploy.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: {{ $root.Values.job.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "gvisor-deploy.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with $root.Values.imagePullSecrets }}
+      imagePullSecrets:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ $sa }}
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with $root.Values.tolerations }}
+      tolerations:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $root.Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      containers:
+        - name: dispatcher
+          image: {{ include "gvisor-deploy.kubectlImage" $root }}
+          imagePullPolicy: {{ $root.Values.job.kubectlImage.pullPolicy }}
+          securityContext:
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          command: ["/bin/sh", "/scripts/dispatch.sh"]
+          args:
+            - "--job-template=/etc/gvisor-job/cleanup-job.yaml"
+            - "--name-prefix={{ $fullname }}-cleanup"
+            - "--parallelism={{ $root.Values.job.parallelism }}"
+            - "--timeout={{ $root.Values.job.jobTimeout }}"
+            - "--label-key={{ $root.Values.nodeLabel }}"
+            - "--unlabel"
+            {{- if $cNodes }}
+            - "--nodes={{ join "," $cNodes }}"
+            {{- else if $cSelector }}
+            - "--node-selector={{ $cSelector }}"
+            {{- end }}
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          volumeMounts:
+            - name: dispatcher-scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: job-templates
+              mountPath: /etc/gvisor-job
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: dispatcher-scripts
+          configMap:
+            name: {{ $fullname }}-dispatcher
+            defaultMode: 0755
+        - name: job-templates
+          configMap:
+            name: {{ $fullname }}-job-templates
+        - name: tmp
+          emptyDir: {}
+{{- end }}
+{{- end }}

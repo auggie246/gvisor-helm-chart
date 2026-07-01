@@ -1,4 +1,6 @@
-gvisor-deploy has been installed successfully.
+gvisor-deploy has been installed successfully (deploymentMode: {{ .Values.deploymentMode | default "daemonset" }}).
+
+{{- if eq (.Values.deploymentMode | default "daemonset") "daemonset" }}
 
 The node installer DaemonSet is rolling out across your selected nodes. Each node will:
   1. Download the gVisor binaries (runsc + containerd-shim-runsc-v1) from your configured repository.
@@ -6,10 +8,28 @@ The node installer DaemonSet is rolling out across your selected nodes. Each nod
   3. Register the "{{ .Values.containerd.runtimeName }}" runtime in {{ .Values.containerd.configPath }}.
   4. Restart containerd (if enabled).
 
+The installer pod stays alive after install so it can be re-triggered on restart.
+
 To verify the DaemonSet is running and ready:
 
   kubectl -n {{ include "gvisor-deploy.namespace" . }} get daemonset {{ include "gvisor-deploy.fullname" . }}
   kubectl -n {{ include "gvisor-deploy.namespace" . }} get pods -l {{ include "gvisor-deploy.selectorLabels" . | replace ": " "=" | replace "\n" "," }}
+{{- else }}
+
+The install dispatcher Job is running. It will:
+  1. Enumerate target nodes (by label selector or explicit list).
+  2. Create one node-pinned install Job per node (paced to {{ .Values.job.parallelism }} at a time).
+  3. Each per-node Job downloads and installs gVisor, edits containerd config, restarts containerd, then EXITS.
+  4. Successfully installed nodes are labeled "{{ .Values.nodeLabel }}=true".
+
+To check the dispatcher and per-node install Jobs:
+
+  kubectl -n {{ include "gvisor-deploy.namespace" . }} get jobs -l app.kubernetes.io/instance={{ .Release.Name }}
+
+To watch the install progress:
+
+  kubectl -n {{ include "gvisor-deploy.namespace" . }} logs job/{{ include "gvisor-deploy.fullname" . }}-install-dispatcher -f
+{{- end }}
 
 {{- if .Values.runtimeClass.create }}
 

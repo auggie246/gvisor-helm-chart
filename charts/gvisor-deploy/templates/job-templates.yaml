@@ -1,0 +1,28 @@
+{{- /*
+Per-node Job templates for deploymentMode: job.
+
+This ConfigMap holds the install and cleanup per-node Job manifests, rendered
+ONCE (constant size, independent of the number of nodes). The dispatcher mounts
+it and for every selected node clones the relevant template, injects
+metadata.name + metadata.namespace + spec.template.spec.nodeName via sed, and
+creates the Job. Keeping the rich pod spec (env/volumes) here means the Helm
+chart stays the single source of truth; the dispatcher only does fan-out.
+
+It is a normal (non-hook) resource: Helm creates it before the post-install
+dispatcher hook runs, and it still exists during the pre-delete cleanup hook
+(release resources are torn down only after pre-delete hooks complete).
+*/ -}}
+{{- if eq (.Values.deploymentMode | default "daemonset") "job" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gvisor-deploy.fullname" . }}-job-templates
+  namespace: {{ include "gvisor-deploy.namespace" . }}
+  labels:
+    {{- include "gvisor-deploy.labels" . | nindent 4 }}
+data:
+  install-job.yaml: |
+{{ include "gvisor-deploy.perNodeJob" (dict "root" . "stage" "install") | indent 4 }}
+  cleanup-job.yaml: |
+{{ include "gvisor-deploy.perNodeJob" (dict "root" . "stage" "cleanup") | indent 4 }}
+{{- end }}

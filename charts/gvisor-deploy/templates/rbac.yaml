@@ -29,3 +29,75 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "gvisor-deploy.serviceAccountName" . }}
     namespace: {{ include "gvisor-deploy.namespace" . }}
+{{- if eq (.Values.deploymentMode | default "daemonset") "job" }}
+---
+# Dedicated, least-privilege identity for the job-mode dispatcher. It is a pure
+# control-plane client: it lists/patches nodes (cluster-scoped, for enumeration
+# and labeling) and manages per-node Jobs in the release namespace
+# (namespace-scoped). It deliberately does NOT get the privileged host-mutation
+# rights of the installer SA; those stay on the main SA, which only the per-node
+# Jobs use.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "gvisor-deploy.dispatcherServiceAccountName" . }}
+  namespace: {{ include "gvisor-deploy.namespace" . }}
+  labels:
+    {{- include "gvisor-deploy.labels" . | nindent 4 }}
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: {{ include "gvisor-deploy.fullname" . }}-dispatcher
+  labels:
+    {{- include "gvisor-deploy.labels" . | nindent 4 }}
+rules:
+  # Enumerating nodes and labeling/unlabeling them is cluster-scoped.
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["list", "patch"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: {{ include "gvisor-deploy.fullname" . }}-dispatcher
+  labels:
+    {{- include "gvisor-deploy.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "gvisor-deploy.fullname" . }}-dispatcher
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "gvisor-deploy.dispatcherServiceAccountName" . }}
+    namespace: {{ include "gvisor-deploy.namespace" . }}
+---
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: {{ include "gvisor-deploy.fullname" . }}-dispatcher
+  namespace: {{ include "gvisor-deploy.namespace" . }}
+  labels:
+    {{- include "gvisor-deploy.labels" . | nindent 4 }}
+rules:
+  # The dispatcher creates/watches/deletes per-node Jobs in its own namespace.
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: {{ include "gvisor-deploy.fullname" . }}-dispatcher
+  namespace: {{ include "gvisor-deploy.namespace" . }}
+  labels:
+    {{- include "gvisor-deploy.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "gvisor-deploy.fullname" . }}-dispatcher
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "gvisor-deploy.dispatcherServiceAccountName" . }}
+    namespace: {{ include "gvisor-deploy.namespace" . }}
+{{- end }}

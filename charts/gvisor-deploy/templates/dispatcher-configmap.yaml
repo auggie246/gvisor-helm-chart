@@ -1,0 +1,187 @@
+{{- /*
+Dispatcher shell script for deploymentMode: job.
+
+This ConfigMap holds the dispatcher script that fans out per-node Jobs. The
+dispatcher:
+  1. Enumerates target nodes (by explicit list or label selector, LIVE at run time).
+  2. Creates one node-pinned Job per node from the job-templates ConfigMap,
+     paced to job.parallelism (batched: create N, wait for all, then next N).
+  3. Waits for each per-node Job to complete (kubectl wait).
+  4. On install success: labels the node with nodeLabel.
+     On cleanup success: removes the nodeLabel.
+  5. Exits 0 if all per-node Jobs succeeded, 1 otherwise.
+
+The dispatcher never touches the host; it is a plain kubectl/shell client.
+*/ -}}
+{{- if eq (.Values.deploymentMode | default "daemonset") "job" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gvisor-deploy.fullname" . }}-dispatcher
+  namespace: {{ include "gvisor-deploy.namespace" . }}
+  labels:
+    {{- include "gvisor-deploy.labels" . | nindent 4 }}
+data:
+  dispatch.sh: |
+    #!/bin/sh
+    set -eu
+
+    # -----------------------------------------------------------------------
+    # Parse arguments
+    # -----------------------------------------------------------------------
+    TEMPLATE=""
+    PREFIX=""
+    PARALLELISM=1
+    NODES=""
+    SELECTOR=""
+    LABEL_KEY=""
+    UNLABEL=false
+    TIMEOUT=600
+
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --job-template=*)  TEMPLATE="${1#*=}" ;;
+        --name-prefix=*)   PREFIX="${1#*=}" ;;
+        --parallelism=*)   PARALLELISM="${1#*=}" ;;
+        --nodes=*)         NODES="${1#*=}" ;;
+        --node-selector=*) SELECTOR="${1#*=}" ;;
+        --label-key=*)     LABEL_KEY="${1#*=}" ;;
+        --unlabel)         UNLABEL=true ;;
+        --timeout=*)       TIMEOUT="${1#*=}" ;;
+        *) echo "[dispatcher] unknown arg: $1" >&2; exit 1 ;;
+      esac
+      shift
+    done
+
+    NAMESPACE="${POD_NAMESPACE:-default}"
+
+    if [ -z "$TEMPLATE" ] || [ -z "$PREFIX" ]; then
+      echo "[dispatcher] ERROR: --job-template and --name-prefix are required" >&2
+      exit 1
+    fi
+
+    # -----------------------------------------------------------------------
+    # Enumerate target nodes
+    # -----------------------------------------------------------------------
+    if [ -n "$NODES" ]; then
+      NODE_LIST=$(echo "$NODES" | tr ',' '\n')
+    elif [ -n "$SELECTOR" ]; then
+      NODE_LIST=$(kubectl get nodes -l "$SELECTOR" -o jsonpath='{.items[*].metadata.name}')
+    else
+      NODE_LIST=$(kubectl get nodes -o jsonpath='{.items[*].metadata.name}')
+    fi
+
+    # Normalise: one node per line, drop blanks
+    NODE_LIST=$(echo "$NODE_LIST" | tr ' ' '\n' | grep -v '^$' || true)
+    TOTAL=$(echo "$NODE_LIST" | grep -c . || true)
+
+    if [ "$TOTAL" -eq 0 ]; then
+      echo "[dispatcher] no target nodes found; nothing to do"
+      exit 0
+    fi
+
+    echo "[dispatcher] targeting $TOTAL node(s) (parallelism: $PARALLELISM, timeout: ${TIMEOUT}s)"
+
+    # -----------------------------------------------------------------------
+    # Sanitise a node name for use as a k8s Job name (lowercase, [a-z0-9-])
+    # -----------------------------------------------------------------------
+    sanitize_name() {
+      echo "$1" | tr '[:upper:]' '[:lower:]' \
+        | sed 's/[^a-z0-9.-]/-/g; s/^[.-]*//; s/[.-]*$//' \
+        | cut -c1-50
+    }
+
+    # -----------------------------------------------------------------------
+    # Create a per-node Job from the template (delete any leftover first)
+    # -----------------------------------------------------------------------
+    create_job() {
+      _node="$1"
+      _job="${PREFIX}-$(sanitize_name "$_node")"
+
+      # Delete any existing Job from a previous run (specs are immutable)
+      kubectl delete job "$_job" -n "$NAMESPACE" --ignore-not-found 2>/dev/null || true
+
+      # Render the template with node identity and create
+      sed -e "s|__JOB_NAME__|${_job}|g" \
+          -e "s|__NAMESPACE__|${NAMESPACE}|g" \
+          -e "s|__NODE_NAME__|${_node}|g" \
+          "$TEMPLATE" | kubectl create -f - >/dev/null 2>&1 && echo "$_job" || echo ""
+    }
+
+    # -----------------------------------------------------------------------
+    # Label or unlabel a node after the per-node Job succeeds
+    # -----------------------------------------------------------------------
+    label_node() {
+      _node="$1"
+      if [ -z "$LABEL_KEY" ]; then
+        return 0
+      fi
+      if [ "$UNLABEL" = "true" ]; then
+        kubectl label node "$_node" "${LABEL_KEY}-" --overwrite 2>/dev/null || true
+      else
+        kubectl label node "$_node" "${LABEL_KEY}=true" --overwrite 2>/dev/null || true
+      fi
+    }
+
+    # -----------------------------------------------------------------------
+    # Process nodes in batches of PARALLELISM
+    # -----------------------------------------------------------------------
+    FAILED=0
+    SUCCEEDED=0
+
+    REMAINING="$NODE_LIST"
+    while [ -n "$(echo "$REMAINING" | grep -v '^$' || true)" ]; do
+      # Take a batch of up to PARALLELISM nodes
+      BATCH=""
+      i=0
+      NEXT_REMAINING=""
+      for _node in $REMAINING; do
+        i=$((i + 1))
+        if [ "$i" -le "$PARALLELISM" ]; then
+          BATCH="$BATCH $_node"
+        else
+          NEXT_REMAINING="$NEXT_REMAINING $_node"
+        fi
+      done
+      REMAINING=$(echo "$NEXT_REMAINING" | sed 's/^ *//')
+
+      # Create all Jobs in the batch
+      BATCH_PAIRS=""
+      for _node in $BATCH; do
+        [ -z "$_node" ] && continue
+        _job=$(create_job "$_node")
+        if [ -n "$_job" ]; then
+          BATCH_PAIRS="$BATCH_PAIRS ${_node}:${_job}"
+          echo "[dispatcher] created job $_job for node $_node"
+        else
+          echo "[dispatcher] ERROR: failed to create job for node $_node" >&2
+          FAILED=$((FAILED + 1))
+        fi
+      done
+
+      # Wait for each Job in the batch (they run in parallel; waits are sequential
+      # but total time is ~ the slowest Job in the batch)
+      for _pair in $BATCH_PAIRS; do
+        _node=$(echo "$_pair" | cut -d: -f1)
+        _job=$(echo "$_pair" | cut -d: -f2)
+        echo "[dispatcher] waiting for job $_job (node $_node)..."
+
+        if kubectl wait --for=condition=complete "job/${_job}" \
+             -n "$NAMESPACE" --timeout="${TIMEOUT}s" 2>/dev/null; then
+          echo "[dispatcher] job $_job succeeded (node $_node)"
+          SUCCEEDED=$((SUCCEEDED + 1))
+          label_node "$_node"
+        else
+          echo "[dispatcher] job $_job failed or timed out (node $_node)" >&2
+          FAILED=$((FAILED + 1))
+        fi
+      done
+    done
+
+    echo "[dispatcher] complete: $SUCCEEDED succeeded, $FAILED failed (of $TOTAL total)"
+
+    if [ "$FAILED" -gt 0 ]; then
+      exit 1
+    fi
+    exit 0
+{{- end }}
