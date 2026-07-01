@@ -317,6 +317,7 @@ spec:
 {{- end }}
           securityContext:
             privileged: true
+            runAsUser: 0
           env:
 {{- if eq $stage "install" }}
             - name: EXIT_AFTER_INSTALL

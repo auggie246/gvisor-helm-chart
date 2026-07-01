@@ -16,4 +16,4 @@ sources:
 - https://github.com/google/gvisor
 - https://gvisor.dev/docs/user_guide/containerd/quick_start/
 type: application
-version: 0.3.0
+version: 0.3.2

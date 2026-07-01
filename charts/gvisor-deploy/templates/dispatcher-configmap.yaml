@@ -83,12 +83,17 @@ data:
     echo "[dispatcher] targeting $TOTAL node(s) (parallelism: $PARALLELISM, timeout: ${TIMEOUT}s)"
 
     # -----------------------------------------------------------------------
-    # Sanitise a node name for use as a k8s Job name (lowercase, [a-z0-9-])
+    # Sanitise a node name for use as a k8s Job name suffix (lowercase, [a-z0-9-]).
+    # The total Job name = PREFIX + "-" + suffix must be ≤ 63 chars because
+    # Kubernetes sets a "job-name" label (value = Job name) on the pod template,
+    # and label values are capped at 63 characters.
     # -----------------------------------------------------------------------
     sanitize_name() {
+      _maxlen=$((63 - ${#PREFIX} - 1))
+      [ "$_maxlen" -lt 1 ] && _maxlen=1
       echo "$1" | tr '[:upper:]' '[:lower:]' \
         | sed 's/[^a-z0-9.-]/-/g; s/^[.-]*//; s/[.-]*$//' \
-        | cut -c1-50
+        | cut -c1-"$_maxlen"
     }
 
     # -----------------------------------------------------------------------
@@ -102,10 +107,12 @@ data:
       kubectl delete job "$_job" -n "$NAMESPACE" --ignore-not-found 2>/dev/null || true
 
       # Render the template with node identity and create
-      sed -e "s|__JOB_NAME__|${_job}|g" \
+      _err=$(sed -e "s|__JOB_NAME__|${_job}|g" \
           -e "s|__NAMESPACE__|${NAMESPACE}|g" \
           -e "s|__NODE_NAME__|${_node}|g" \
-          "$TEMPLATE" | kubectl create -f - >/dev/null 2>&1 && echo "$_job" || echo ""
+          "$TEMPLATE" | kubectl create -f - 2>&1 >/dev/null) \
+        && echo "$_job" \
+        || { echo "[dispatcher] kubectl create failed for node $_node: $_err" >&2; echo ""; }
     }
 
     # -----------------------------------------------------------------------
